@@ -1,0 +1,15 @@
+# 依赖与构建产物
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+
+# 本机配置与日志（含敏感信息，禁止打进镜像）
+backend/.env
+backend/logs/
+frontend/dist/
+
+# 文档与版本控制
+.git/
+docs/
+.DS_Store

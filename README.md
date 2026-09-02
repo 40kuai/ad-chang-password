@@ -1,93 +1,145 @@
-# changpwd
+# AD 域控自助改密平台
 
+一个用于用户自助修改 Windows AD 域控登录密码的 Web 平台。
 
+用户输入域账号、旧密码与新密码，通过 LDAPS 连接域控完成身份验证与密码修改，全程不依赖管理员权限，改密结果即时反馈。
 
-## Getting started
+## 功能特性
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- 用户自助改密：输入域账号 + 旧密码 + 新密码（含确认），提交后由后端通过 LDAPS 完成修改
+- 前端基础校验：长度、复杂度（大小写字母 / 数字 / 特殊字符）、新旧密码不一致、两次输入一致
+- 标准 AD 改密方式：Delete 旧密码 + Add 新密码（UTF-16LE），符合 AD 自助改密规范
+- 错误分类提示：旧密码错误 / 密码不合域控策略 / 连接失败等
+- 审计日志：记录账号、时间、来源 IP、操作结果（绝不记录密码明文）
+- Mock 模式：无真实域控环境也可本地演示全流程
+- Docker 部署：多阶段构建，单端口提供服务
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## 技术栈
 
-## Add your files
+| 端 | 技术 |
+|----|------|
+| 前端 | Vue 3 + Vite |
+| 后端 | Python 3.9+ / FastAPI / ldap3 |
+| 数据库 | 无（不落库，仅日志文件） |
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## 目录结构
 
 ```
-cd existing_repo
-git remote add origin https://dops-git.nanshe-arch.com/habitat-it/changpwd.git
-git branch -M main
-git push -uf origin main
+changpwd/
+├── backend/                 # 后端服务
+│   ├── app/
+│   │   ├── main.py          # FastAPI 入口与路由
+│   │   ├── config.py        # .env 配置读取
+│   │   ├── ldap_service.py  # LDAP 绑定与改密逻辑
+│   │   └── logger.py        # 审计日志
+│   ├── requirements.txt     # 依赖清单（锁定版本）
+│   └── .env.example         # 配置模板
+├── frontend/                # 前端页面（Vue3 + Vite）
+│   ├── src/App.vue          # 改密表单页
+│   └── vite.config.js       # 开发代理 /api -> 后端
+├── Dockerfile               # 多阶段构建镜像
+└── .gitignore
 ```
 
-## Integrate with your tools
+## 快速开始（本地开发）
 
-- [ ] [Set up project integrations](https://dops-git.nanshe-arch.com/habitat-it/changpwd/-/settings/integrations)
+### 1. 后端
 
-## Collaborate with your team
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+cp .env.example .env          # 按实际环境修改 LDAP_HOST / LDAP_DOMAIN 等
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+```
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+### 2. 前端
 
-## Test and Deploy
+```bash
+cd frontend
+npm install --registry=https://registry.npmmirror.com
+npm run dev                   # 默认 http://localhost:5173
+```
 
-Use the built-in continuous integration in GitLab.
+前端开发服务器已配置 `/api` 代理到后端，直接访问前端地址即可联调。
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+### 3. Mock 模式（无真实域控演示）
 
-***
+在 `backend/.env` 中设置 `MOCK_LDAP=true`，旧密码须为 `OldPass@123`，其余任意合规新密码即可演示成功流程。
 
-# Editing this README
+## Docker 部署
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```bash
+# 构建镜像（基础镜像默认走国内加速源；可直连 Docker Hub 时可用 --build-arg 覆盖）
+docker build -t ad-password:1.0.0 .
 
-## Suggestions for a good README
+# 运行（通过环境变量注入域控配置，勿写入镜像）
+docker run -d -p 8000:8000 \
+  -e LDAP_HOST=<域控地址> \
+  -e LDAP_DOMAIN=<AD 域> \
+  -e LDAP_PORT=636 \
+  -e LDAP_USE_SSL=true \
+  ad-password:1.0.0
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+构建产物由 FastAPI 单端口托管：`http://<主机>:8000/` 即为改密页面，`/api/*` 为接口。
 
-## Name
-Choose a self-explaining name for your project.
+## 配置说明
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| `LDAP_HOST` | 域控服务器地址（FQDN 或 IP） | `dc.example.com` |
+| `LDAP_PORT` | LDAPS 端口，通常 636 | `636` |
+| `LDAP_USE_SSL` | 是否启用 LDAPS | `true` |
+| `LDAP_DOMAIN` | AD 域（注意与域控主机 FQDN 的区别） | `example.com` |
+| `LOG_FILE` | 审计日志文件路径 | `logs/audit.log` |
+| `MOCK_LDAP` | 是否启用 Mock 模式 | `false` |
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+> 域控主机 FQDN（如 `dc1.corp.local`）与 AD 域（如 `corp.local`）通常不同，两者需分别配置正确。
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## 接口说明
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### POST /api/change-password
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+请求体：
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```json
+{
+  "username": "zhangsan",
+  "old_password": "OldPass123!",
+  "new_password": "NewPass456!"
+}
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+响应（统一结构）：
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```json
+{ "code": 0, "message": "密码修改成功" }
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+错误码约定：
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+| code | 含义 |
+|------|------|
+| 0 | 成功 |
+| 1001 | 旧密码错误或账号不存在 |
+| 1002 | 新密码不符合域控密码策略 |
+| 1003 | 连接域控失败或超时 |
+| 1004 | 请求参数校验失败 |
+| 1005 | 其他域控操作失败 |
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+### GET /api/health
+
+健康检查。
+
+## 安全说明
+
+- 全程强制 LDAPS（TLS）连接，AD 明文连接会拒绝改密
+- 使用用户自身凭据认证，后端不保存任何账号密码
+- 审计日志不含密码明文
+- 敏感配置统一走环境变量 / `.env`，不硬编码，`.env` 已被 git 忽略
+- 容器内以非 root 用户运行
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+内部项目，仅限授权范围内使用。
